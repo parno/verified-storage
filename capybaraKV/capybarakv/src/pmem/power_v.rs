@@ -1,25 +1,27 @@
 #![cfg_attr(verus_keep_ghost, verus::trusted)]
-use crate::pmem::pmemspec_t::*;
 use crate::pmem::pmcopy_t::*;
+use crate::pmem::pmemspec_t::*;
 use crate::pmem::power_t::*;
-use vstd::prelude::*;
 use vstd::invariant::*;
-use vstd::tokens::frac::*;
+use vstd::prelude::*;
+use vstd::resource::frac::*;
+use vstd::resource::ghost_var::*;
+use vstd::resource::Loc;
 
 verus! {
 
 pub trait SimpleCheckPermission<State> : Sized
 {
     spec fn permits(&self, s: State) -> bool;
-    spec fn id(&self) -> int;
+    spec fn id(&self) -> Loc;
 
     proof fn apply(tracked self, tracked credit: OpenInvariantCredit, tracked r: &mut GhostVarAuth<State>, new_state: State)
         requires
             self.id() == old(r).id(),
             self.permits(new_state),
         ensures
-            r.id() == old(r).id(),
-            r@ == new_state
+            final(r).id() == old(r).id(),
+            final(r)@ == new_state
         opens_invariants
             any;
 }
@@ -58,7 +60,7 @@ impl<State, SimplePerm> CheckPermission<State> for SimplePermissionAdapter<State
         self.perm.permits(s2)
     }
 
-    closed spec fn id(&self) -> int {
+    closed spec fn id(&self) -> Loc {
         self.perm.id()
     }
 
@@ -77,7 +79,7 @@ pub trait PermissionFactory<State>: Sized
     type Perm: CheckPermission<State>;
 
     spec fn permits(&self, s1: State, s2: State) -> bool;
-    spec fn id(&self) -> int;
+    spec fn id(&self) -> Loc;
 
     proof fn grant_permission(tracked &self) -> (tracked perm: Self::Perm)
         ensures
@@ -137,7 +139,7 @@ impl<State, PermA, PermB> CheckPermission<State> for CombinedPermission<State, P
         self.a.permits(s1, s2) || self.b.permits(s1, s2)
     }
 
-    closed spec fn id(&self) -> int {
+    closed spec fn id(&self) -> Loc {
         self.a.id()
     }
 
@@ -183,7 +185,7 @@ impl<PMRegion> PoWERPersistentMemoryRegion<PMRegion>
         self.pm_region.constants()
     }
 
-    pub closed spec fn id(&self) -> int
+    pub closed spec fn id(&self) -> Loc
     {
         self.pm_region.id()
     }
@@ -272,10 +274,10 @@ impl<PMRegion> PoWERPersistentMemoryRegion<PMRegion>
             forall |s| can_result_from_partial_write(s, old(self)@.durable_state, addr as int, bytes@)
                   ==> #[trigger] perm@.permits(old(self)@.durable_state, s),
         ensures
-            self.inv(),
-            self.constants() == old(self).constants(),
-            self.id() == old(self).id(),
-            self@.can_result_from_write(old(self)@, addr as int, bytes@),
+            final(self).inv(),
+            final(self).constants() == old(self).constants(),
+            final(self).id() == old(self).id(),
+            final(self)@.can_result_from_write(old(self)@, addr as int, bytes@),
             perm@.completed(result@),
     {
         self.pm_region.write(addr, bytes, perm)
@@ -299,10 +301,10 @@ impl<PMRegion> PoWERPersistentMemoryRegion<PMRegion>
             forall |s| can_result_from_partial_write(s, old(self)@.durable_state, addr as int, to_write.spec_to_bytes())
                   ==> #[trigger] perm@.permits(old(self)@.durable_state, s),
         ensures
-            self.inv(),
-            self.constants() == old(self).constants(),
-            self.id() == old(self).id(),
-            self@.can_result_from_write(old(self)@, addr as int, to_write.spec_to_bytes()),
+            final(self).inv(),
+            final(self).constants() == old(self).constants(),
+            final(self).id() == old(self).id(),
+            final(self)@.can_result_from_write(old(self)@, addr as int, to_write.spec_to_bytes()),
             perm@.completed(result@),
     {
         self.pm_region.serialize_and_write(addr, to_write, perm)
@@ -318,10 +320,10 @@ impl<PMRegion> PoWERPersistentMemoryRegion<PMRegion>
             old(self).inv(),
         ensures
             old(self)@.flush_predicted(), // it must have been prophesized that this flush would happen
-            self.inv(),
-            self.constants() == old(self).constants(),
-            self.id() == old(self).id(),
-            self@ == old(self)@,
+            final(self).inv(),
+            final(self).constants() == old(self).constants(),
+            final(self).id() == old(self).id(),
+            final(self)@ == old(self)@,
     {
         self.pm_region.flush()
     }

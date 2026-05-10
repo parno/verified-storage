@@ -1,21 +1,25 @@
 #![allow(unused_imports)]
 use vstd::prelude::*;
 
-use crate::pmem::crashinv_t::*;
-use crate::pmem::pmemspec_t::*;
-use crate::pmem::pmcopy_t::*;
-use crate::pmem::power_t::*;
-use std::hash::Hash;
 use super::concurrentspec_t::*;
 use super::impl_v::*;
-use super::spec_t::*;
 use super::recover_v::*;
 use super::rwkv_t::*;
-use vstd::tokens::frac::*;
-use super::rwlock_t::{RwLockReadGuardWithPredicate, RwLockPredicate, RwLockWithPredicate, RwLockWriter};
+use super::rwlock_t::{
+    RwLockPredicate, RwLockReadGuardWithPredicate, RwLockWithPredicate, RwLockWriter,
+};
+use super::spec_t::*;
+use crate::pmem::crashinv_t::*;
+use crate::pmem::pmcopy_t::*;
+use crate::pmem::pmemspec_t::*;
+use crate::pmem::power_t::*;
+use std::hash::Hash;
+use std::sync::Arc;
 use vstd::invariant::*;
 use vstd::modes::*;
-use std::sync::Arc;
+use vstd::resource::frac::*;
+use vstd::resource::ghost_var::*;
+use vstd::resource::Loc;
 
 verus! {
 
@@ -35,8 +39,8 @@ where
 
 pub(super) struct ConcurrentKvStorePredicate
 {
-    id: int,
-    powerpm_id: int,
+    id: Loc,
+    powerpm_id: Loc,
 }
 
 impl<PM, K, I, L> RwLockPredicate<ConcurrentKvStoreInternal<PM, K, I, L>> for ConcurrentKvStorePredicate
@@ -147,7 +151,7 @@ exec fn maybe_commit<PM, K, I, L, Op, CB>(
         inv@.constant().rwlock_id == pred@.id,
         inv@.constant().durable_id == pred@.powerpm_id,
     ensures
-        pred@.inv(*kv_internal),
+        pred@.inv(*final(kv_internal)),
         cb.post(result.1@, inv@.constant().caller_id, op, result.0),
 {
     match tentative_result {
@@ -232,25 +236,25 @@ trait OpParameters<K, I, L, Op>: Sized
             old(kv)@.durable == old(kv)@.tentative,
             old(kv)@.ps.logical_range_gaps_policy == old(kv)@.durable.logical_range_gaps_policy,
         ensures
-            kv.valid(),
-            kv@.ps == old(kv)@.ps,
-            kv@.pm_constants == old(kv)@.pm_constants,
-            kv@.durable == old(kv)@.durable,
-            kv@.powerpm_id == old(kv)@.powerpm_id,
+            final(kv).valid(),
+            final(kv)@.ps == old(kv)@.ps,
+            final(kv)@.pm_constants == old(kv)@.pm_constants,
+            final(kv)@.durable == old(kv)@.durable,
+            final(kv)@.powerpm_id == old(kv)@.powerpm_id,
             ({
                 let old_ckv = ConcurrentKvStoreView::<K, I, L>{ ps: old(kv)@.ps, pm_constants: old(kv)@.pm_constants,
                                                                 kv: old(kv)@.tentative };
-                let new_ckv = ConcurrentKvStoreView::<K, I, L>{ ps: kv@.ps, pm_constants: kv@.pm_constants,
-                                                                kv: kv@.tentative };
+                let new_ckv = ConcurrentKvStoreView::<K, I, L>{ ps: final(kv)@.ps, pm_constants: final(kv)@.pm_constants,
+                                                                kv: final(kv)@.tentative };
                 self.op().result_valid(old_ckv, new_ckv, result)
             }),
             match result {
                 Ok(_) => true,
                 Err(_) => {
-                    &&& kv@.used_key_slots == kv@.durable.num_keys()
-                    &&& kv@.used_list_element_slots == kv@.durable.num_list_elements()
-                    &&& kv@.used_transaction_operation_slots == 0
-                    &&& kv@.tentative == kv@.durable
+                    &&& final(kv)@.used_key_slots == final(kv)@.durable.num_keys()
+                    &&& final(kv)@.used_list_element_slots == final(kv)@.durable.num_list_elements()
+                    &&& final(kv)@.used_transaction_operation_slots == 0
+                    &&& final(kv)@.tentative == final(kv)@.durable
                 },
             },
     ;
@@ -712,7 +716,7 @@ where
     I: PmCopy + Sized + std::fmt::Debug,
     L: PmCopy + LogicalRange + std::fmt::Debug + Copy,
 {
-    closed spec fn id(self) -> int
+    closed spec fn id(self) -> Loc
     {
         self.inv@.constant().caller_id
     }
@@ -1167,7 +1171,7 @@ impl<PM, K, I, L, Op, Lin> CheckPermission<Seq<u8>> for OpPerm<PM, K, I, L, Op, 
         }
     }
 
-    closed spec fn id(&self) -> int {
+    closed spec fn id(&self) -> Loc {
         self.inv.constant().durable_id
     }
 
@@ -1252,7 +1256,7 @@ impl<PM, K, I, L> CheckPermission<Seq<u8>> for NoopPerm<PM, K, I, L>
         recover_journal_then_kv::<PM, K, I, L>(old_state) == recover_journal_then_kv::<PM, K, I, L>(new_state)
     }
 
-    closed spec fn id(&self) -> int {
+    closed spec fn id(&self) -> Loc {
         self.inv.constant().durable_id
     }
 
@@ -1298,7 +1302,7 @@ impl<PM, K, I, L> PermissionFactory<Seq<u8>> for NoopPermFactory<PM, K, I, L>
         }.permits(old_state, new_state)
     }
 
-    closed spec fn id(&self) -> int {
+    closed spec fn id(&self) -> Loc {
         NoopPerm{
             inv: self.inv.clone(),
         }.id()

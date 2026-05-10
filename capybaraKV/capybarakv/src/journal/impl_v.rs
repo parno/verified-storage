@@ -1,14 +1,15 @@
 #![allow(unused_imports)]
-use vstd::prelude::*;
-use vstd::tokens::frac::*;
-use crate::common::subrange_v::*;
-use crate::pmem::pmcopy_t::*;
-use crate::pmem::pmemspec_t::*;
-use crate::pmem::power_t::*;
 use super::entry_v::*;
 use super::inv_v::*;
 use super::recover_v::*;
 use super::spec_v::*;
+use crate::common::subrange_v::*;
+use crate::pmem::pmcopy_t::*;
+use crate::pmem::pmemspec_t::*;
+use crate::pmem::power_t::*;
+use vstd::prelude::*;
+use vstd::resource::frac::*;
+use vstd::resource::ghost_var::*;
 
 verus! {
 
@@ -142,10 +143,10 @@ where
         requires
             old(self).valid(),
         ensures
-            self.valid(),
-            self@.valid(),
-            self.recover_idempotent(),
-            self@ == old(self)@.abort(),
+            final(self).valid(),
+            final(self)@.valid(),
+            final(self).recover_idempotent(),
+            final(self)@ == old(self)@.abort(),
     {
         self.journal_length = 0;
         self.journaled_addrs = Ghost(Set::<int>::empty());
@@ -156,9 +157,9 @@ where
         requires
             old(self).valid(),
         ensures
-            self.valid(),
-            self@ == old(self)@,
-            self@.durable_state == self@.read_state,
+            final(self).valid(),
+            final(self)@ == old(self)@,
+            final(self)@.durable_state == final(self)@.read_state,
     {
         self.powerpm.flush();
     }
@@ -170,4 +171,3 @@ pub open(super) spec fn spec_journal_entry_overhead() -> nat
 }
 
 }
-
