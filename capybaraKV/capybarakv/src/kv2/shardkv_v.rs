@@ -238,6 +238,7 @@ where
         self.inv@.constant().combined_id
     }
 
+    #[verifier::spinoff_prover]
     exec fn setup(
         nshards: usize,
         Tracked(shard_res): Tracked<Map<int, GhostVar<ConcurrentKvStoreView::<K, I, L>>>>,
